@@ -1,0 +1,128 @@
+% ============================================================
+%  Relazione — Video Stabilization Dashboard
+%  Corso di Multimedia - Primo Anno
+% ============================================================
+\documentclass[12pt, a4paper]{article}
+
+% --- Encoding e lingua ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+
+% --- Font ---
+\usepackage{lmodern}
+
+% --- Layout ---
+\usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=3cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+
+% --- Matematica ---
+\usepackage{amsmath, amssymb, bm}
+
+% --- Grafica e figure ---
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\graphicspath{{./}{images/}{../images/}}
+
+% --- Tabelle ---
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{colortbl}
+
+% --- Codice sorgente ---
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray}\itshape,
+    stringstyle=\color{teal},
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    showstringspaces=false,
+    tabsize=4,
+    captionpos=b
+}
+\lstdefinestyle{python}{language=Python}
+
+% --- Hyperlink e PDF metadata ---
+\usepackage[
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=green!60!black,
+    urlcolor=blue
+]{hyperref}
+
+% --- Intestazioni ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small Video Stabilization Dashboard}
+\lhead{\small Corso di Multimedia}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- Utilities ---
+\usepackage{microtype}
+\usepackage{parskip}
+
+% ============================================================
+\begin{document}
+
+% --- Frontespizio ---
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+
+    {\Large\bfseries Università degli Studi\\[0.3em]
+    Corso di Multimedia\par}
+
+    \vspace{3cm}
+
+    {\Huge\bfseries Video Stabilization Dashboard\par}
+
+    \vspace{1cm}
+
+    {\Large\itshape Confronto tra approcci classici e deep learning\\
+    per la stabilizzazione video\par}
+
+    \vspace{3cm}
+
+    \begin{tabular}{rl}
+        \textbf{Studente:} & Salvatore [Cognome] \\[0.5em]
+        \textbf{Anno Accademico:} & 2025/2026 \\
+    \end{tabular}
+
+    \vfill
+
+    {\large Febbraio 2026\par}
+\end{titlepage}
+
+% --- Indice ---
+\tableofcontents
+\newpage
+
+% ============================================================
+%  SEZIONI
+% ============================================================
+\input{sections/01_introduzione}
+\newpage
+
+\input{sections/02_teoria}
+\newpage
+
+\input{sections/03_implementazione}
+\newpage
+
+\input{sections/04_esperimenti}
+\newpage
+
+\input{sections/05_discussione_conclusioni}
+\newpage
+
+\end{document}

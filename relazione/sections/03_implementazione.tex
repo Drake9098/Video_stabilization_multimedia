@@ -1,0 +1,172 @@
+% ============================================================
+%  Sezione 3 — Implementazione
+% ============================================================
+\section{Implementazione}
+\label{sec:implementazione}
+
+Il sistema è stato interamente sviluppato in Python~3, sfruttando
+OpenCV per le operazioni di visione artificiale classica,
+PyTorch e \texttt{torchvision} per il componente deep
+learning, e Streamlit per l'interfaccia utente interattiva. La scelta di
+queste librerie rispecchia lo stato dell'arte per ciascun dominio e garantisce
+una buona portabilità tra sistemi operativi. Il codice è organizzato in
+moduli distinti con responsabilità ben separate, il che ha facilitato tanto
+lo sviluppo incrementale quanto la fase di testing.
+
+% ------------------------------------------------------------
+\subsection{Architettura del Sistema}
+\label{sec:impl:architettura}
+
+La pipeline di stabilizzazione è suddivisa in quattro moduli principali.
+\texttt{motion\_estimation.py} si occupa di ricavare la trasformazione
+inter-frame da coppie di frame in scala di grigi. \texttt{trajectory\_smoothing.py}
+integra tali stime in una traiettoria cumulativa e la liscia con uno dei due
+algoritmi disponibili. \texttt{video\_stabilization.py} orchestra l'intera
+sequenza — dalla lettura del file video all'applicazione delle correzioni
+geometriche — ed espone due funzioni di alto livello,
+\texttt{stabilize\_video\_moving\_average} e \texttt{stabilize\_video\_kalman}.
+Infine, \texttt{metrics.py} calcola le metriche quantitative descritte nella
+Sezione~\ref{sec:teoria:metriche} e salva i risultati in formato JSON per
+il confronto tra esperimenti successivi.
+
+\texttt{app.py}, il punto di ingresso dell'applicazione, non contiene logica
+elaborativa: il suo ruolo è esclusivamente quello di raccogliere i parametri
+dall'utente, invocare i moduli sopra descritti e presentarne i risultati
+attraverso la dashboard Streamlit.
+
+% ------------------------------------------------------------
+\subsection{Stima del Moto con SIFT}
+\label{sec:impl:sift}
+
+L'implementazione SIFT utilizza direttamente \texttt{cv2.SIFT\_create},
+disponibile in OpenCV a partire dalla versione~4.4 a seguito della scadenza
+del brevetto originale. I quattro parametri principali esposti all'utente —
+numero massimo di keypoint (\texttt{n\_features}), soglia di contrasto
+(\texttt{contrast\_threshold}), soglia sugli edge (\texttt{edge\_threshold})
+e deviazione standard della piramide gaussiana (\texttt{sigma}) — consentono
+di adattare il rilevatore alla densità di texture della scena.
+
+Una volta estratti i descrittori da entrambi i frame, il matching avviene
+con un \emph{Brute-Force Matcher} sulla norma $L_2$, seguito dal ratio test
+di Lowe con soglia configurabile (default $0.75$). Le corrispondenze accettate
+vengono passate a \texttt{cv2.estimateAffinePartial2D} con il flag
+\texttt{RANSAC} e una soglia di reproiezione di $5$ pixel. Quando il numero
+di corrispondenze disponibili scende sotto $4$ — il minimo necessario per
+stimare una trasformazione affine parziale — la funzione restituisce
+$(dx, dy, d\theta) = (0, 0, 0)$, assumendo che non vi sia movimento stimabile
+e preservando il frame corrente senza correzione.
+
+Una scelta implementativa rilevante riguarda la gestione dei keypoint tra frame
+consecutivi: anziché rieseguire il rilevamento da zero a ogni passo, i
+keypoint e i descrittori del frame corrente vengono mantenuti in memoria e
+riutilizzati come riferimento per il frame successivo, riducendo il numero di
+chiamate a \texttt{detectAndCompute} della metà.
+
+% ------------------------------------------------------------
+\subsection{Stima del Moto con RAFT}
+\label{sec:impl:raft}
+
+Il modello RAFT viene caricato tramite \texttt{torchvision.models.optical\_flow}
+con i pesi pre-addestrati su Sintel e FlyingChairs (\texttt{Raft\_Large\_Weights.DEFAULT}
+oppure \texttt{Raft\_Small\_Weights.DEFAULT} per la variante compatta). Per
+evitare il costo di caricamento a ogni frame, il modello è implementato come
+\emph{singleton}: alla prima chiamata viene istanziato e mantenuto in memoria
+per tutta la sessione, venendo riutilizzato per tutti i frame successivi.
+
+La pre-elaborazione dei frame segue esattamente le specifiche ufficiali di
+\texttt{torchvision}: i frame in scala di grigi vengono prima convertiti in
+RGB (replicando il canale tre volte), poi trasformati in tensori \texttt{uint8}
+con forma $(C, H, W)$. La normalizzazione a virgola mobile nell'intervallo
+$[-1, 1]$ viene delegata interamente ai \texttt{transforms} ufficiali del
+modello, invocati sulla coppia di frame prima dell'inferenza, nel rispetto
+del preprocessing atteso dalla rete.
+
+L'inferenza restituisce un elenco di flussi predetti alle diverse iterazioni
+del modulo GRU; viene utilizzata solo l'ultima predizione, che corrisponde
+alla stima più raffinata. Il flusso denso risultante, di forma $(H, W, 2)$,
+viene poi elaborato per estrarre i tre parametri di moto globale. La
+traslazione $(dx, dy)$ viene stimata come mediana dei valori del flusso
+sull'intera immagine: rispetto alla media, la mediana è robusta agli outlier
+provocati da oggetti in primo piano che si muovono in modo indipendente dalla
+telecamera, senza necessità di applicare RANSAC su ogni singolo frame. Per la
+rotazione $d\theta$, si campiona una griglia uniforme di punti dal campo di
+flusso (\texttt{num\_samples} configurabile, default 200), si costruiscono
+le corrispondenze $(x, y) \to (x+u, y+v)$ e si applica nuovamente
+\texttt{estimateAffinePartial2D} con RANSAC per estrarre l'angolo di
+rotazione dalla matrice affine $2\times3$.
+
+% ------------------------------------------------------------
+\subsection{Smoothing della Traiettoria}
+\label{sec:impl:smoothing}
+
+Entrambi i metodi di smoothing operano sulla traiettoria cumulativa,
+calcolata sommando iterativamente le trasformazioni incrementali stimate:
+
+\begin{lstlisting}[style=python, caption={Calcolo della traiettoria cumulativa.}]
+trajectory = np.cumsum(transforms_array, axis=0)
+\end{lstlisting}
+
+La Media Mobile è implementata tramite \texttt{np.convolve} con un kernel
+uniforme normalizzato di larghezza $2r+1$. I bordi della sequenza vengono
+gestiti con un padding di tipo \texttt{edge} (replica del primo e dell'ultimo
+valore), una scelta conservativa che evita l'introduzione di artefatti alle
+estremità del video.
+
+Il Filtro di Kalman è implementato tramite \texttt{cv2.KalmanFilter(6, 3)},
+con 6 stati e 3 misure. Le matrici di transizione $F$ e di misura $H$
+corrispondono esattamente al modello a velocità costante descritto nella
+Sezione~\ref{sec:teoria:kalman}. La matrice di covarianza del rumore di
+processo $Q$ è diagonale con valori $q_{\text{pos}}$ sulle componenti di
+posizione e $2\,q_{\text{pos}}$ su quelle di velocità: il coefficiente
+moltiplicativo $2$ bilancia la maggiore incertezza sull'accelerazione rispetto
+alla posizione, producendo un comportamento leggermente più reattivo sui
+cambiamenti di direzione senza però rinunciare allo smoothing. La matrice $R$
+è scalare identità moltiplicata per \texttt{measurement\_noise}, il parametro
+principale esposto all'utente per controllare quanto aggressivamente il filtro
+attenua il jitter.
+
+Una volta ottenuta la traiettoria smoothata $\hat{\mathbf{p}}_t$, la
+correzione da applicare al frame $t$ è $\mathbf{c}_t = \hat{\mathbf{p}}_t -
+\mathbf{p}_t$. La funzione \texttt{apply\_transform\_with\_zoom} costruisce
+la matrice affine $2\times3$ usando \texttt{cv2.getRotationMatrix2D},
+aggiunge la componente di traslazione e chiama \texttt{cv2.warpAffine} con
+interpolazione bilineare. Il bordo del frame, eventualmente esposto dal
+warping, viene riflesso (\texttt{BORDER\_REFLECT}) anziché campionato a zero,
+a vantaggio della continuità visiva; il fattore di zoom applicato amplia
+leggermente il frame prima del warping, garantendo che il crop risultante
+non contenga mai regioni nere.
+
+% ------------------------------------------------------------
+\subsection{Zoom Adattivo}
+\label{sec:impl:zoom}
+
+La correzione geometrica sposta i pixel del frame di una quantità
+proporzionale all'entità del jitter residuo: se la correzione è grande,
+porzioni del bordo dell'immagine risultano non coperte. La soluzione adottata
+è uno zoom uniforme — un leggero ingrandimento che ``nasconde'' i bordi
+esposti senza distorcere il contenuto — il cui fattore è configurabile
+dall'utente nell'intervallo $[1.0, 1.3]$. Valori intorno a $1.05$--$1.10$
+sono in genere sufficienti per la maggior parte delle sequenze  tipiche; valori
+più elevati sono necessari solo in presenza di shake molto intenso o quando si
+imposta un smoothing molto aggressivo.
+
+% ------------------------------------------------------------
+\subsection{Dashboard Streamlit}
+\label{sec:impl:dashboard}
+
+L'interfaccia utente è strutturata come un'applicazione Streamlit a pagina
+singola. La barra laterale raccoglie tutti i controlli: la selezione del
+metodo di motion estimation (SIFT o RAFT), i parametri specifici dell'algoritmo
+scelto, la selezione del metodo di smoothing, il raggio della Media Mobile o
+i parametri $Q$ e $R$ del Kalman, il fattore di zoom e la risoluzione di
+elaborazione. L'area principale visualizza, dopo l'elaborazione, tre schede:
+la prima mostra i grafici delle traiettorie grezze e smoothate sui tre assi;
+la seconda presenta il confronto video affiancato tra l'originale instabile e
+la versione stabilizzata; la terza espone le tabelle di metriche per i due
+metodi di smoothing.
+
+Un aspetto di particolare cura implementativa riguarda la gestione della
+sessione: i parametri correnti vengono confrontati con quelli dell'elaborazione
+precedente in \texttt{st.session\_state}, e il processing viene rilanciato
+automaticamente solo quando si rileva una variazione effettiva, evitando
+ricalcoli inutili durante la normale navigazione dell'interfaccia.

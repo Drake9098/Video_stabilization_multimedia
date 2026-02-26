@@ -1,0 +1,75 @@
+% ============================================================
+%  Sezione 1 — Introduzione
+% ============================================================
+\section{Introduzione}
+
+\subsection{Motivazione}
+
+La stabilizzazione video è uno dei problemi fondamentali nell'elaborazione digitale
+di sequenze d'immagini. Quando un video viene acquisito da una telecamera tenuta a
+mano, montata su un veicolo in movimento o soggetta a vibrazioni meccaniche, il
+risultato è una sequenza affetta da \emph{jitter}: piccole oscillazioni ad alta
+frequenza della posizione e dell'orientamento del sensore che rendono il filmato
+visivamente fastidioso e, in applicazioni più sofisticate, difficile da analizzare
+automaticamente.
+
+Il problema è rilevante in numerosi contesti pratici: dalla videografia amatoriale
+ai sistemi di sorveglianza, dalla guida autonoma alla robotica, fino all'analisi
+sportiva e alle riprese d'azione. In tutti questi scenari è desiderabile separare
+il \emph{moto intenzionale} della telecamera (panoramiche, zoom, inseguimento di
+un soggetto) dall'instabilità indesiderata, attenuando quest'ultima senza
+alterare il contenuto informativo del video.
+
+\subsection{Obiettivi del Progetto}
+
+Questo progetto ha due obiettivi principali:
+
+\begin{enumerate}
+    \item \textbf{Implementare una pipeline completa di stabilizzazione video}
+          che comprenda la stima del movimento inter-frame, lo
+          smoothing della traiettoria stimata e la conseguente correzione
+          geometrica dei frame.
+
+    \item \textbf{Confrontare sistematicamente} due famiglie di approcci alla
+          stima del moto — metodi classici basati su feature (SIFT) e
+          metodi deep learning (RAFT) — in combinazione con due strategie
+          di smoothing della traiettoria: la Media Mobile e il Filtro di
+          Kalman.
+\end{enumerate}
+
+Il confronto viene condotto in modo rigoroso attraverso un insieme di metriche
+quantitative — RMS displacement, jitter reduction, stability score e fidelity
+score — i cui risultati sono integrati in una dashboard interattiva realizzata
+con Streamlit, che consente di esplorare in tempo reale l'effetto di ciascun
+parametro.
+
+\subsection{Approccio Metodologico}
+
+La pipeline implementata segue uno schema a tre stadi:
+
+\begin{enumerate}
+    \item \textbf{Motion Estimation}: stima del moto globale
+          $(dx_t,\, dy_t,\, d\theta_t)$ tra coppie di frame consecutivi,
+          utilizzando alternativamente SIFT o RAFT.
+
+    \item \textbf{Trajectory Smoothing}: integrazione delle stime incrementali
+          in una traiettoria cumulativa $\mathbf{p}_t = \sum_{i=1}^{t}
+          (dx_i, dy_i, d\theta_i)$, seguita da una fase di smoothing con
+          Media Mobile o Filtro di Kalman per ottenere la traiettoria
+          target $\hat{\mathbf{p}}_t$.
+
+    \item \textbf{Frame Correction}: applicazione della trasformazione affine
+          di correzione $\mathbf{c}_t = \hat{\mathbf{p}}_t - \mathbf{p}_t$
+          a ogni frame, con zoom adattivo per eliminare i bordi neri
+          introdotti dal warping.
+\end{enumerate}
+
+\subsection{Struttura della Relazione}
+
+La relazione è organizzata come segue. La Sezione~\ref{sec:teoria} illustra
+il background teorico dei metodi utilizzati: optical flow, SIFT, RAFT, Media
+Mobile e Filtro di Kalman. La Sezione~\ref{sec:implementazione} descrive le
+scelte implementative e l'architettura del sistema. La
+Sezione~\ref{sec:esperimenti} presenta il setup sperimentale e i risultati
+ottenuti. La Sezione~\ref{sec:discussione} discute i risultati e traccia le
+conclusioni.

@@ -1,0 +1,241 @@
+% ============================================================
+%  Sezione 4 — Esperimenti
+% ============================================================
+\section{Esperimenti}
+\label{sec:esperimenti}
+
+% ------------------------------------------------------------
+\subsection{Setup Sperimentale}
+\label{sec:exp:setup}
+
+Tutti gli esperimenti descritti in questa sezione sono stati condotti sulla
+medesima sequenza video, acquisita con una fotocamera tenuta a mano. La risoluzione
+di elaborazione è stata fissata a $1280$ pixel di larghezza per entrambi gli
+esperimenti, mantenendo il rapporto d'aspetto originale.
+
+Le due configurazioni confrontate corrispondono ai due metodi di stima del
+moto implementati: l'\textbf{Esperimento~1} utilizza SIFT con i parametri di
+default (500 keypoint massimi, soglia di contrasto $0.04$, soglia sugli edge
+$10$, $\sigma = 1.6$, ratio test $0.75$); l'\textbf{Esperimento~2} adotta
+RAFT Large con 200 punti di campionamento sul flusso denso per la stima della
+rotazione. Per rendere il confronto equo, i parametri di smoothing sono
+identici nei due esperimenti: raggio della Media Mobile $r = 30$, e per il
+Filtro di Kalman $Q = 0.0005$ e $R = 2.0$. Lo zoom è abilitato al $10\%$ in
+entrambi i casi.
+
+I due metodi operano su hardware diverso: SIFT gira interamente su CPU,
+mentre RAFT sfrutta la GPU tramite CUDA. La fase di smoothing — avendo
+complessi\-tà $O(N)$ — contribuisce in modo trascurabile al tempo totale
+in entrambi i casi (circa $0.28$~s), concentrando l'interesse sulle
+prestazioni della sola stima del moto.
+
+% ------------------------------------------------------------
+\subsection{Esperimento 1: SIFT Baseline}
+\label{sec:exp:sift}
+
+Nel primo esperimento la stima del moto ha richiesto complessivamente $40.7$~s
+per l'intera sequenza, con un tempo totale di elaborazione di $41.2$~s.
+La Tabella~\ref{tab:exp1} riporta le metriche principali per i due metodi
+di smoothing applicati alla traiettoria stimata da SIFT.
+
+\begin{table}[H]
+\centering
+\caption{Metriche — Esperimento 1 (SIFT, $r{=}30$, $Q{=}0.0005$, $R{=}2.0$).}
+\label{tab:exp1}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metrica} & \textbf{Media Mobile} & \textbf{Kalman} \\
+\midrule
+Stability Score $[0\text{--}100]$         & $82.3$  & $45.6$  \\
+Fidelity Score $[0\text{--}100]$          & $41.7$  & $67.0$  \\
+\midrule
+RMS raw $x$ [px]                          & \multicolumn{2}{c}{$7.71$} \\
+RMS smoothed $x$ [px]                     & $6.71$  & $7.34$  \\
+RMS raw $y$ [px]                          & \multicolumn{2}{c}{$4.58$} \\
+RMS smoothed $y$ [px]                     & $3.90$  & $4.24$  \\
+RMS raw $\theta$ [°]                      & \multicolumn{2}{c}{$0.133$} \\
+RMS smoothed $\theta$ [°]                 & $0.028$ & $0.100$ \\
+\midrule
+Jitter Reduction $x$ [\%]                 & $77.3$  & $43.4$  \\
+Jitter Reduction $y$ [\%]                 & $79.1$  & $48.3$  \\
+Jitter Reduction $\theta$ [\%]            & $98.6$  & $44.6$  \\
+\midrule
+Max offset $x$ [px]                       & $53.5$  & $38.6$  \\
+Max offset $y$ [px]                       & $25.0$  & $16.2$  \\
+\midrule
+Tempo motion estimation [s]               & \multicolumn{2}{c}{$40.7$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La Media Mobile raggiunge uno stability score di $82.3$, grazie a una forte
+riduzione del jitter su tutti e tre gli assi — particolarmente marcata sulla
+rotazione ($98.6\%$). Tuttavia il fidelity score si ferma a $41.7$: la
+convoluzione con la finestra uniforme attenua in modo indiscriminato ogni
+oscillazione, incluse quelle a frequenza più bassa che possono corrispondere
+a movimenti intenzionali della telecamera. Lo dimostrano anche i valori del
+RMS smoothed: l'RMS sull'asse $x$ scende da $7.71$ a $6.71$~px, ma la
+riduzione è quasi interamente attribuibile all'attenuazione del jitter piuttosto
+che a una precisa inseguimento della traiettoria raw.
+
+Il Filtro di Kalman presenta un profilo complementare. Lo stability score
+scende a $45.6$ — la jitter reduction è più modesta, attorno al $44$--$48\%$
+per $x$ e $y$ — ma il fidelity score sale a $67.0$, confermando che il filtro
+riesce a distinguere meglio tra oscillazioni di breve durata e movimenti
+intenzionali a più bassa frequenza. La componente di velocità nel vettore
+di stato consente al Kalman di \emph{predire} l'evoluzione della traiettoria
+invece di limitarsi a mediarla, producendo una stima più fedele al moto
+originale. L'offset massimo applicato è sensibilmente minore rispetto alla
+Media Mobile ($38.6$ vs $53.5$~px su $x$), a indicare che la traiettoria
+smoothata non si discosta eccessivamente da quella grezza.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{SIFT_1}
+    \caption{Esperimento 1 (SIFT): confronto tra traiettoria grezza, smoothata
+    con Media Mobile e smoothata con Filtro di Kalman sugli assi $x$, $y$ e $\theta$.}
+    \label{fig:sift1}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{Esperimento 2: RAFT Baseline}
+\label{sec:exp:raft}
+
+Il secondo esperimento sostituisce SIFT con RAFT Large mantenendo invariati
+tutti gli altri parametri. La stima del moto ha richiesto $43.1$~s, circa
+$2.4$~s in più rispetto a SIFT: la differenza è attribuibile al tempo di
+inferenza della rete e alla gestione del tensore su CPU. La
+Tabella~\ref{tab:exp2} riporta le metriche per questo esperimento.
+
+\begin{table}[H]
+\centering
+\caption{Metriche — Esperimento 2 (RAFT Large, $r{=}30$, $Q{=}0.0005$, $R{=}2.0$).}
+\label{tab:exp2}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metrica} & \textbf{Media Mobile} & \textbf{Kalman} \\
+\midrule
+Stability Score $[0\text{--}100]$         & $95.1$  & $59.2$  \\
+Fidelity Score $[0\text{--}100]$          & $26.4$  & $59.0$  \\
+\midrule
+RMS raw $x$ [px]                          & \multicolumn{2}{c}{$2.69$} \\
+RMS smoothed $x$ [px]                     & $1.01$  & $1.81$  \\
+RMS raw $y$ [px]                          & \multicolumn{2}{c}{$1.40$} \\
+RMS smoothed $y$ [px]                     & $0.311$ & $0.830$ \\
+RMS raw $\theta$ [°]                      & \multicolumn{2}{c}{$0.138$} \\
+RMS smoothed $\theta$ [°]                 & $0.028$ & $0.102$ \\
+\midrule
+Jitter Reduction $x$ [\%]                 & $90.9$  & $57.9$  \\
+Jitter Reduction $y$ [\%]                 & $98.2$  & $67.4$  \\
+Jitter Reduction $\theta$ [\%]            & $97.4$  & $45.6$  \\
+\midrule
+Max offset $x$ [px]                       & $20.3$  & $14.6$  \\
+Max offset $y$ [px]                       & $13.0$  & $8.15$  \\
+\midrule
+Tempo motion estimation [s]               & \multicolumn{2}{c}{$43.1$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Il primo elemento che emerge con evidenza è l'RMS raw di RAFT: $2.69$~px
+sull'asse $x$ contro i $7.71$~px di SIFT. Un valore così basso non indica
+necessariamente che il video originale sia più stabile, ma piuttosto che
+RAFT produce stime del moto globale intrinsecamente meno rumorose. Il flusso
+denso, calcolato sull'intera immagine con una rete addestrata su milioni di
+esempi, è molto meno suscettibile ai falsi match che affliggono il pipeline
+SIFT in presenza di ripetizioni di pattern, zone a bassa texture o motion
+blur.
+
+Con la Media Mobile, lo stability score raggiunge $95.1$ — il valore più alto
+tra i quattro scenari testati — e la jitter reduction sull'asse $y$ tocca il
+$98.2\%$. Il prezzo da pagare è un fidelity score di appena $26.4$: poiché
+le stime RAFT sono già quasi prive di jitter, applicare una finestra media di
+30 frame ha l'effetto di eliminare anche i movimenti intenzionali a frequenza
+medio-bassa, producendo una traiettoria smoothata che si discosta
+significativamente da quella raw. In altri termini, la Media Mobile è
+sprecata su un segnale già pulito.
+
+Il Kalman nel contesto RAFT mostra invece un profilo molto più bilanciato.
+Lo stability score ($59.2$) supera il corrispondente SIFT ($45.6$), mentre il
+fidelity score ($59.0$) è notevolmente più alto rispetto alla Media Mobile
+RAFT ($26.4$) e si avvicina al valore ottenuto dal Kalman su SIFT ($67.0$).
+Il Kalman riesce a sfruttare la qualità delle stime RAFT senza distruggerle:
+il suo modello a velocità costante evita di interpretare come jitter quelle
+componenti di bassa frequenza che invece corrispondono a movimenti reali della
+telecamera.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{RAFT_1}
+    \caption{Esperimento 2 (RAFT): confronto tra traiettoria grezza, smoothata
+    con Media Mobile e smoothata con Filtro di Kalman sugli assi $x$, $y$ e $\theta$.}
+    \label{fig:raft1}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{Confronto Diretto tra i Quattro Scenari}
+\label{sec:exp:confronto}
+
+La Tabella~\ref{tab:confronto} sintetizza i risultati dei quattro scenari
+(metodo di stima $\times$ metodo di smoothing) nelle due metriche di
+valutazione più rappresentative.
+
+\begin{table}[H]
+\centering
+\caption{Confronto complessivo: Stability Score e Fidelity Score.}
+\label{tab:confronto}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{llcc}
+\toprule
+\textbf{Motion Est.} & \textbf{Smoothing} & \textbf{Stability} & \textbf{Fidelity} \\
+\midrule
+SIFT  & Media Mobile & $82.3$ & $41.7$ \\
+SIFT  & Kalman       & $45.6$ & $67.0$ \\
+RAFT  & Media Mobile & $\mathbf{95.1}$ & $26.4$ \\
+RAFT  & Kalman       & $59.2$ & $\mathbf{59.0}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La tabella mette in luce due tendenze sistematiche. Prima: a parità di metodo
+di smoothing, RAFT produce sempre uno stability score più alto di SIFT
+(+12.8 punti con Media Mobile, +13.6 con Kalman), segno che la qualità della
+stima del moto ha un impatto diretto sulla qualità del risultato finale.
+Seconda: a parità di metodo di stima, la Media Mobile supera sempre il Kalman
+in stabilità ma ne è sempre inferiore in fedeltà; lo scarto in stabilità è
+di $36.7$ punti per SIFT e $35.9$ per RAFT, mentre lo scarto in fedeltà è di
+$25.3$ e $32.6$ punti rispettivamente, evidenziando che il compromesso
+stabilità--fedeltà è una caratteristica strutturale dei due smoothing e non
+dipende dal metodo di stima a monte.
+
+Vale la pena notare il comportamento asimmetrico del fidelity score: con
+SIFT la Media Mobile ottiene $41.7$ contro $67.0$ del Kalman, uno scarto di
+$25.3$ punti. Con RAFT, lo stesso confronto produce uno scarto di $32.6$
+punti ($26.4$ vs $59.0$). Questo suggerisce che quanto più le stime raw sono
+accurate (cioè quanto meno rumorose), tanto più la Media Mobile è
+\emph{deleteria} per la fedeltà al moto intenzionale: avendo poco jitter da
+eliminare, la sua azione di smoothing si abbatte quasi interamente sul
+contenuto informativo del segnale.
+
+% ------------------------------------------------------------
+\subsection{Costo Computazionale}
+\label{sec:exp:tempo}
+
+Come atteso, la fase di smoothing è computazionalmente trascurabile in
+entrambi gli esperimenti: $0.28$~s per la Media Mobile e $0.28$--$0.30$~s
+per il Kalman, indipendentemente dal metodo di stima a monte. Il carico
+computazionale è dominato quasi interamente dalla stima del moto: $40.7$~s
+per SIFT (su CPU) e $43.1$~s per RAFT (su GPU con CUDA).
+
+Il fatto che RAFT su GPU richieda un tempo paragonabile a SIFT su CPU è
+rilevante: nonostante la rete abbia milioni di parametri, il singleton del
+modello viene caricato una sola volta e l'inferenza viene eseguita in
+modalità \texttt{no\_grad}, minimizzando l'overhead di PyTorch. Il collo
+di bottiglia per RAFT è il trasferimento dei tensori tra RAM e VRAM e la
+latenza dei kernel CUDA per frame di risoluzione relativamente piccola
+($1280$ px): su sequenze ad alta risoluzione o con GPU più recenti il
+vantaggio rispetto a SIFT su CPU sarebbe più marcato. SIFT, dal canto suo,
+benefilcerebbe relativamente poco da una GPU, essendo un algoritmo basato
+su operazioni sparse difficilmente parallelizzabili.

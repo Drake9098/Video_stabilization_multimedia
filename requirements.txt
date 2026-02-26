@@ -1,0 +1,27 @@
+# Advanced Video Stabilization Dashboard
+# Dipendenze Python per l'applicazione Streamlit
+
+# Framework web
+streamlit>=1.28.0
+
+# Computer Vision e Image Processing
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+
+# Numerical computing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Plotting e visualizzazione
+matplotlib>=3.7.0
+
+# Utilities
+Pillow>=10.0.0
+
+# Deep Learning (Opzionale - solo per StabNet)
+# Installa con: pip install torch torchvision
+# Per CPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Per GPU (CUDA 11.8): pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+torch>=2.0.0
+torchvision>=0.15.0
+tqdm>=4.65.0  # Progress bar per training

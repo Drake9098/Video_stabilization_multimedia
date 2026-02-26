@@ -1,0 +1,282 @@
+% ============================================================
+%  Sezione 2 — Background Teorico
+% ============================================================
+\section{Background Teorico}
+\label{sec:teoria}
+
+Per comprendere le scelte progettuali del sistema realizzato è opportuno
+ripercorrere i fondamenti teorici su cui si basa ciascun componente della
+pipeline. Questa sezione illustra dapprima il concetto di optical flow e i
+due metodi di stima del moto adottati — SIFT e RAFT — e successivamente le
+tecniche di smoothing della traiettoria, concludendo con una descrizione
+delle metriche di valutazione impiegate.
+
+% ------------------------------------------------------------
+\subsection{Optical Flow e Stima del Moto Globale}
+\label{sec:teoria:optflow}
+
+L'optical flow descrive il campo di velocità apparente dei pixel tra due
+frame consecutivi di una sequenza video. In modo formale, dato il valore di
+intensità $I(x, y, t)$ di un pixel alla posizione $(x,y)$ all'istante $t$,
+l'ipotesi di conservazione della luminosità impone che lo stesso punto fisico
+della scena abbia la medesima intensità nell'immagine successiva:
+
+\begin{equation}
+    I(x, y, t) = I(x + dx,\; y + dy,\; t + dt).
+    \label{eq:brightness}
+\end{equation}
+
+Sviluppando in serie di Taylor al primo ordine e dividendo per $dt$, si
+ottiene la cosiddetta \emph{equazione del flusso ottico}:
+
+\begin{equation}
+    I_x \, u + I_y \, v + I_t = 0,
+    \label{eq:optflow}
+\end{equation}
+
+dove $(u, v)$ è la velocità del pixel e $I_x, I_y, I_t$ sono le derivate
+parziali dell'intensità. Poiché l'equazione~\eqref{eq:optflow} è una sola
+equazione in due incognite, il problema è sottoderminato: per risolverlo
+occorre imporre vincoli aggiuntivi, che differenziano i diversi approcci
+esistenti in letteratura.
+
+Nella pratica della stabilizzazione video non è necessario calcolare il flusso
+denso per tutti i pixel: è sufficiente stimare la \emph{trasformazione
+globale} tra due frame, ossia la tripla $(dx, dy, d\theta)$ che descrive la
+traslazione e la rotazione della telecamera. Questo problema viene ricondotto
+alla stima di una trasformazione affine parziale (similarità) tra un insieme
+di corrispondenze puntuali, individuate con metodi diversi a seconda
+dell'approccio scelto.
+
+% ------------------------------------------------------------
+\subsection{SIFT: Scale-Invariant Feature Transform}
+\label{sec:teoria:sift}
+
+Proposto da Lowe nel 2004, SIFT è uno dei descrittori di
+feature locali più diffusi e studiati in computer vision. Il suo principio di
+funzionamento si articola in due fasi principali: il rilevamento dei keypoint
+e il calcolo del descrittore.
+
+Il rilevamento sfrutta la \emph{scale-space pyramid}: l'immagine viene
+convoluta con filtri gaussiani a scala crescente, dopodiché si calcolano le
+differenze tra octave adiacenti (Difference of Gaussians, DoG). I punti di
+massimo e minimo locali nello spazio DoG —- sia spazialmente che lungo la
+dimensione di scala — corrispondono a strutture dell'immagine stabili e
+ripetibili. Ogni keypoint viene localizzato con precisione sub-pixel e gli
+viene assegnato un orientamento dominante calcolato sull'istogramma dei
+gradienti nel suo intorno, garantendo l'invarianza alla rotazione.
+
+Il descrittore è un vettore di 128 dimensioni che codifica la distribuzione
+dei gradienti in una regione $4\times4$ attorno al keypoint, suddivisa in
+celle ciascuna con un istogramma ad 8 bin. Questa rappresentazione è robusta a
+piccole variazioni di illuminazione, traslazioni locali e deformazioni
+geometriche moderate.
+
+Per stimare il moto tra due frame, si estraggono i keypoint SIFT da entrambe
+le immagini, si calcolano i descrittori e si effettua il matching con un
+\emph{Brute-Force Matcher} sulla norma $L_2$. Al fine di filtrare le
+corrispondenze ambigue, si applica il \emph{ratio test di Lowe}: una
+corrispondenza viene accettata solo se il rapporto tra la distanza al primo
+vicino più prossimo e quella al secondo è inferiore a una soglia (tipicamente
+$0.75$). Le corrispondenze superstiti vengono poi passate a un estimatore
+RANSAC per calcolare la trasformazione affine
+parziale, che restituisce la stima di $(dx, dy, d\theta)$ in modo robusto
+rispetto agli outlier prodotti da oggetti in movimento in primo piano.
+
+Il principale limite di SIFT in questo contesto è la sua dipendenza dalla
+presenza di strutture texturizzate nell'immagine: scene sfocate, pannelli
+uniformi o scene d'azione con motion blur pesante possono produrre un numero
+insufficiente di keypoint, degradando la qualità della stima.
+
+% ------------------------------------------------------------
+\subsection{RAFT: Recurrent All-Pairs Field Transforms}
+\label{sec:teoria:raft}
+
+RAFT, introdotto da Teed e Deng nel 2020, rappresenta lo
+stato dell'arte nei metodi di optical flow basati su deep learning. A
+differenza degli approcci classici che operano su feature sparse, RAFT stima
+un flusso \emph{denso} per ogni pixel dell'immagine, sfruttando una
+architettura interamente differenziabile addestrata end-to-end.
+
+L'architettura si compone di tre blocchi principali. Il \emph{feature encoder}
+processa entrambi i frame con una rete convoluzionale condivisa producendo
+rappresentazioni a risoluzione ridotta ($1/8$ dell'originale). Il
+\emph{context encoder} processa il solo frame di riferimento e fornisce
+informazioni contestuali per il blocco di aggiornamento. Cuore del metodo è
+la \emph{correlation volume}: per ogni coppia di pixel tra i due frame si
+calcola il prodotto scalare tra le rispettive feature, ottenendo un volume
+$4$D che misura la somiglianza tra tutti i possibili accoppiamenti. Questo
+volume viene poi interrogato a livelli multipli di risoluzione (\emph{pooling
+pyramid}) per gestire efficientemente spostamenti di entità variabile.
+
+La stima del flusso viene raffinata iterativamente da un modulo
+\emph{GRU} (Gated Recurrent Unit): partendo da un flusso iniziale nullo,
+ogni iterazione produce una correzione $\Delta f$ che aggiorna la stima
+corrente. Grazie al carattere iterativo, RAFT riesce a gestire spostamenti
+anche molto grandi senza ricorrere alle piramidi gaussiane necessarie nei
+metodi classici.
+
+Nel contesto di questo progetto il flusso denso prodotto da RAFT viene
+utilizzato per stimare la trasformazione globale della telecamera. La
+traslazione $(dx, dy)$ viene estratta calcolando la \emph{mediana} sull'intero
+campo di flusso: la mediana è intrinsecamente robusta agli outlier
+(corrispondenti a oggetti in movimento in primo piano) senza necessità di
+RANSAC esplicito. La componente di rotazione $d\theta$ viene invece stimata
+applicando RANSAC a un campione uniforme di corrispondenze estratte dal flusso
+denso, come si descriverà in dettaglio nella Sezione~\ref{sec:implementazione}.
+
+% ------------------------------------------------------------
+\subsection{Smoothing della Traiettoria}
+\label{sec:teoria:smoothing}
+
+Una volta stimate le trasformazioni incrementali $(dx_t, dy_t, d\theta_t)$
+per ogni coppia di frame, queste vengono integrate per ottenere la
+\emph{traiettoria cumulativa} della telecamera:
+
+\begin{equation}
+    \mathbf{p}_t = \sum_{i=1}^{t} (dx_i,\, dy_i,\, d\theta_i).
+    \label{eq:trajectory}
+\end{equation}
+
+La traiettoria $\mathbf{p}_t$ cattura sia il moto intenzionale (panoramiche,
+inseguimento del soggetto) che il jitter indesiderato. L'obiettivo dello
+smoothing è produrre una traiettoria $\hat{\mathbf{p}}_t$ che conservi il
+moto lento e intenzionale attenuando le oscillazioni ad alta frequenza. La
+correzione da applicare al frame $t$ è semplicemente la differenza
+$\mathbf{c}_t = \hat{\mathbf{p}}_t - \mathbf{p}_t$.
+
+\subsubsection{Media Mobile}
+
+La Media Mobile è il metodo più semplice e immediato. Data una finestra di
+larghezza $2r+1$, la traiettoria smoothata si ottiene come:
+
+\begin{equation}
+    \hat{p}_t = \frac{1}{2r+1} \sum_{k=-r}^{r} p_{t+k}.
+    \label{eq:ma}
+\end{equation}
+
+L'implementazione effettiva utilizza una convoluzione con un kernel uniforme,
+il che corrisponde a un filtro passa-basso con risposta in frequenza
+$\text{sinc}(f \cdot (2r+1))$. Il parametro $r$ controlla il trade-off tra
+riduzione del jitter e fedeltà al moto originale: valori grandi producono una
+traiettoria molto liscia ma appiattiscono anche le panoramiche lente;
+valori piccoli preservano meglio i movimenti intenzionali ma lasciano
+filtrare più jitter.
+
+Un limite strutturale della Media Mobile è l'introduzione di un ritardo di
+fase di $r$ frame: per calcolare $\hat{p}_t$ è necessario conoscere i frame
+futuri fino a $t+r$. In un sistema offline, come quello implementato in questo
+progetto, questo non costituisce un problema; in applicazioni real-time
+sarebbe invece necessario ricorrere a filtri causali.
+
+\subsubsection{Filtro di Kalman}
+\label{sec:teoria:kalman}
+
+Il Filtro di Kalman è un estimatore ricorsivo ottimo per
+sistemi lineari soggetti a rumore gaussiano. In questo progetto viene adottato
+un modello a \emph{moto costante} con stato:
+
+\begin{equation}
+    \mathbf{x}_t = (x_t,\, y_t,\, \theta_t,\, \dot{x}_t,\, \dot{y}_t,\, \dot{\theta}_t)^\top,
+    \label{eq:state}
+\end{equation}
+
+dove le prime tre componenti sono la posizione cumulativa e le ultime tre le
+velocità. Il modello di transizione è:
+
+\begin{equation}
+    \mathbf{x}_{t|t-1} = F\,\mathbf{x}_{t-1},
+    \qquad
+    F =
+    \begin{pmatrix}
+        I_3 & I_3 \\
+        0_3 & I_3
+    \end{pmatrix},
+    \label{eq:kalman_pred}
+\end{equation}
+
+e l'osservazione è la sola posizione $\mathbf{z}_t = H\,\mathbf{x}_t$ con
+$H = [I_3 \mid 0_3]$.
+
+Il filtro alterna una fase di \emph{predizione}
+
+\begin{equation}
+    \hat{\mathbf{x}}_{t|t-1} = F\,\hat{\mathbf{x}}_{t-1},
+    \qquad
+    P_{t|t-1} = F\,P_{t-1}\,F^\top + Q,
+    \label{eq:predict}
+\end{equation}
+
+e una fase di \emph{aggiornamento}
+
+\begin{equation}
+    K_t = P_{t|t-1}\,H^\top\!\left(H\,P_{t|t-1}\,H^\top + R\right)^{-1},
+    \qquad
+    \hat{\mathbf{x}}_t = \hat{\mathbf{x}}_{t|t-1} + K_t\!\left(\mathbf{z}_t - H\,\hat{\mathbf{x}}_{t|t-1}\right),
+    \label{eq:update}
+\end{equation}
+
+dove $Q$ è la matrice di covarianza del rumore di processo e $R$ quella del
+rumore di misura. Il rapporto $Q/R$ governa il comportamento del filtro:
+valori elevati di $Q$ (o bassi di $R$) portano il filtro a fidarsi quasi
+ciecamente delle misure, riproducendo fedelmente la traiettoria originale con
+poco smoothing; valori bassi di $Q$ (o elevati di $R$) producono una stima
+vicina al modello di moto costante, ignorando in larga misura le oscillazioni
+osservate. Rispetto alla Media Mobile, il Filtro di Kalman è intrinsecamente
+causale e in grado di sfruttare il modello dinamico del sistema, producendo
+in genere una migliore preservazione dei movimenti intenzionali a parità di
+attenuazione del jitter.
+
+% ------------------------------------------------------------
+\subsection{Metriche di Valutazione}
+\label{sec:teoria:metriche}
+
+Valutare la qualità di un algoritmo di stabilizzazione non è banale: una
+semplice ispezione visiva è soggettiva e non riproducibile. Per questo motivo
+sono state implementate quattro metriche quantitative, ciascuna volta a
+catturare un aspetto diverso delle prestazioni.
+
+Il \textbf{RMS displacement} misura l'ampiezza media degli spostamenti
+incrementali lungo la traiettoria smoothata:
+
+\begin{equation}
+    \text{RMS}_x = \sqrt{\frac{1}{N-1}\sum_{t=1}^{N-1}(\hat{p}_{x,t+1} - \hat{p}_{x,t})^2}.
+    \label{eq:rms}
+\end{equation}
+
+Valori bassi indicano una traiettoria fluida; valori alti segnalano che
+permane ancora jitter residuo.
+
+La \textbf{jitter reduction} quantifica la riduzione percentuale della varianza
+degli spostamenti incrementali tra traiettoria grezza e traiettoria
+smoothata:
+
+\begin{equation}
+    \text{JR}_x = \left(1 - \frac{\text{Var}(\Delta\hat{p}_x)}{\text{Var}(\Delta p_x)}\right)\times 100\%.
+    \label{eq:jr}
+\end{equation}
+
+Lo \textbf{stability score} è una media pesata delle jitter reduction sui tre
+assi, con pesi $0.4$ per $x$, $0.4$ per $y$ e $0.2$ per $\theta$,
+rispecchiando la maggiore percettibilità delle traslazioni rispetto alle
+rotazioni, e produce un valore in $[0, 100]$.
+
+Infine, il \textbf{fidelity score} misura quanto la traiettoria smoothata
+preserva il moto intenzionale, calcolando il coefficiente $R^2$ nello spazio
+degli incrementi:
+
+\begin{equation}
+    R^2 = 1 - \frac{\text{Var}(\Delta p - \Delta\hat{p})}{\text{Var}(\Delta p)}.
+    \label{eq:r2}
+\end{equation}
+
+Lavorare sugli incrementi, anziché sui valori assoluti della traiettoria,
+elimina l'effetto del trend a bassa frequenza (ad esempio una panoramica
+lenta) dalla normalizzazione, rendendo il confronto tra metodi più equo. Un
+metodo che attenua aggressivamente tutta la traiettoria tenderà ad avere
+$\Delta\hat{p} \approx 0$, il che implica una differenza $\Delta p -
+\Delta\hat{p} \approx \Delta p$ e quindi $R^2 \approx 0$; un metodo che
+segue fedelmente il moto intenzionale mantenendo solo il jitter avrà invece
+$R^2$ elevato. Le due metriche — stability score e fidelity score — sono in
+tensione tra loro e catturano congiuntamente il trade-off fondamentale di
+qualsiasi algoritmo di smoothing.

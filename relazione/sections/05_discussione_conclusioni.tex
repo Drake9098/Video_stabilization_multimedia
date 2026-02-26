@@ -1,0 +1,147 @@
+% ============================================================
+%  Sezione 5 — Discussione e Conclusioni
+% ============================================================
+\section{Discussione e Conclusioni}
+\label{sec:discussione}
+
+% ------------------------------------------------------------
+\subsection{Interpretazione dei Risultati}
+\label{sec:disc:interpretazione}
+
+I risultati degli esperimenti convergono verso un'indicazione chiara: la
+qualità del risultato finale dipende in modo cruciale dalla catena completa
+del pipeline, e la scelta del metodo di stima del moto ha un peso almeno
+pari a quello del metodo di smoothing. Questo è un punto non scontato: si
+potrebbe essere tentati di pensare che uno smoother sufficientemente aggressivo
+possa compensare le imprecisioni della stima del moto a monte, ma i dati
+mostrano che così non è. Il fatto che la Media Mobile applicata a RAFT
+raggiunga uno stability score di $95.1$ mentre la stessa Media Mobile
+applicata a SIFT si fermi a $82.3$ — pur con parametri di smoothing identici
+— dimostra che la qualità della traiettoria raw condiziona strettamente la
+qualità di quella smoothata.
+
+Il trade-off tra stability score e fidelity score merita un'attenzione
+particolare. Come si è visto, i due indicatori tendono a muoversi in direzioni
+opposte: ogni aumento dello stability score comporta un costo in termini di
+fedeltà al moto originale, e viceversa. Questo non è un artefatto del sistema
+implementato, ma riflette un limite fondamentale di qualsiasi approccio di
+smoothing lineare: una finestra di integrazione larga elimina più rumore ma
+degrada più segnale utile. Il Filtro di Kalman si posiziona lungo questa curva
+di compromesso in modo più vantaggioso rispetto alla Media Mobile, poiché il
+suo modello cinematico lo rende selettivo rispetto alla frequenza: attenua
+le oscillazioni rapide mantenendo quelle lente, invece di trattare
+uniformemente tutte le componenti spettrali come fa la convoluzione con un
+kernel rettangolare.
+
+Un risultato particolarmente istruttivo emerge dal confronto RAFT + Media
+Mobile: questo scenario ottiene il massimo stability score ($95.1$) ma anche
+il minimo fidelity score ($26.4$). La ragione va ricercata proprio nella
+qualità delle stime RAFT. Poiché il flusso ottico denso è già quasi privo di
+jitter ad alta frequenza, la Media Mobile non trova molto da eliminare su quel
+fronte; compensa invece abbattendo indiscriminatamente tutta la variabilità
+del segnale, inclusi i movimenti intenzionali. In pratica, uno smoother così
+conservativo ``pialla'' una traiettoria già quasi uniforme, producendo un video
+con telecamera quasi ferma che potrebbe risultare artificiale e innaturale allo
+spettatore. Questo suggerisce che la scelta dei parametri di smoothing debba
+essere adattata alla qualità dell'estimatore a monte: con RAFT è sufficiente
+un raggio di Media Mobile molto più piccolo, o un Kalman con $R$ ridotto,
+per ottenere una stabilizzazione efficace senza perdere il moto intenzionale.
+
+% ------------------------------------------------------------
+\subsection{Limiti del Sistema}
+\label{sec:disc:limiti}
+
+Il sistema presenta alcuni limiti che vale la pena riconoscere esplicitamente.
+Un primo limite riguarda la latenza complessiva: più di $40$~secondi per
+processare una sequenza sono accettabili in un contesto offline, ma
+proibitivi per applicazioni real-time. RAFT beneficia già dell'accelerazione
+GPU tramite CUDA, il che lo rende competitivo con SIFT su CPU nonostante la
+maggiore complessità del modello; tuttavia, per avvicinarsi a prestazioni
+real-time sarebbe necessario ridurre la risoluzione di elaborazione o adottare
+varianti più leggere come RAFT Small, a scapito dell'accuratezza. SIFT, invece,
+gira interamente su CPU e non può beneficiare di accelerazione GPU in modo
+diretto, rappresentando il vero collo di bottiglia in scenari ad alta
+risoluzione.
+
+Sul piano della robustezza, SIFT mostra una vulnerabilità nota in scene con
+poca texture o in presenza di motion blur intenso: in questi contesti il numero
+di keypoint rilevabili può scendere sotto la soglia minima per RANSAC, e la
+funzione ritorna $(0, 0, 0)$ per l'intero frame, introducendo un'imprecisione
+nella traiettoria cumulativa che si propaga ai frame successivi. RAFT è
+strutturalmente immune a questo problema poiché opera su tutti i pixel, ma
+è soggetto a propri artefatti nelle scene con superfici riflettenti o in
+condizioni di sottoesposizione severa.
+
+Un altro limite riguarda il modello di moto adottato: il sistema stima e
+corregge esclusivamente la trasformazione di similarità nel piano dell'immagine
+(traslazione + rotazione + scala uniforme), ignorando le componenti di moto
+tridimensionale — variazioni di prospettiva, rollio fuori piano, variazioni
+focali. Questo modello è adeguato per le tipiche oscillazioni da camera a mano,
+ma potrebbe rivelarsi insufficiente per sequenze acquisite con droni o con
+camere montate su veicoli in rapido movimento.
+
+Infine, il fidelity score basato su $R^2$ fornisce una misurazione utile ma
+non cattura la qualità percepita dall'osservatore umano. Due traiettorie con
+lo stesso fidelity score possono produrre risultati visivamente molto diversi
+a seconda di dove si concentrano i residui di errore: un errore concentrato
+in pochi frame è più disturbante dello stesso errore distribuito uniformemente
+lungo l'intera sequenza.
+
+% ------------------------------------------------------------
+\subsection{Linee di Sviluppo Future}
+\label{sec:disc:futuro}
+
+Diverse direzioni di sviluppo sembrano promettenti. Sul fronte delle
+prestazioni, un guadagno immediato sarebbe ottenibile elaborando i frame
+in batch anziché uno alla volta, riducendo l'overhead dei trasferimenti
+tra RAM e VRAM per RAFT e sfruttando meglio il parallelismo della GPU.
+In parallelo, l'adozione di un modello di moto omografico — in grado di
+stimare la trasformazione prospettica completa tra due frame — permetterebbe
+di gestire correttamente le rotazioni tridimensionali e le variazioni di
+campo visivo.
+
+Sul fronte dello smoothing, un'esplorazione interessante riguarderebbe
+l'adozione di filtri adattativi che modulino automaticamente i parametri
+$Q$ e $R$ in funzione del contenuto dinamico della scena: in una sequenza
+con inquadratura statica è ragionevole imporre un smoothing più aggressivo
+rispetto a una panoramica, e un sistema di rilevamento automatico del tipo
+di moto potrebbe guidare questa adattività.
+
+Un'altra direzione è l'integrazione di metriche di qualità percettiva — come
+SSIM o VMAF — per affiancare le metriche geometriche attualmente implementate,
+avvicinando la valutazione al giudizio soggettivo dell'utente finale. Questo
+consentirebbe anche di costruire funzioni di ottimizzazione più allineate con
+la reale esperienza visiva, aprendo la strada a tecniche di tuning automatico
+dei parametri.
+
+% ------------------------------------------------------------
+\subsection{Conclusioni}
+\label{sec:disc:conclusioni}
+
+Questo progetto ha realizzato e valutato una pipeline completa di
+stabilizzazione video che integra due approcci alla stima del moto — il
+classico SIFT e il modello deep learning RAFT — con due strategie di smoothing
+della traiettoria, la Media Mobile e il Filtro di Kalman, il tutto accessibile
+tramite una dashboard interattiva che permette di esplorarne i parametri in
+tempo reale.
+
+I risultati sperimentali mostrano che RAFT produce stime del moto
+sistematicamente più accurate di SIFT, con un RMS raw inferiore di quasi tre
+volte, e che questa qualità si traduce direttamente in stability score più
+elevati a valle dello smoothing. Il Filtro di Kalman offre il miglior
+bilanciamento tra riduzione del jitter e preservazione del moto intenzionale,
+posizionandosi in modo più vantaggioso sul trade-off stabilità--fedeltà
+rispetto alla Media Mobile indipendentemente dal metodo di stima. La
+combinazione RAFT + Kalman è quella che risulta più equilibrata nei due
+indicatori simultaneamente, con uno stability score di $59.2$ e un fidelity
+score di $59.0$, mentre RAFT + Media Mobile è preferibile quando l'obiettivo
+è la massima stabilità e si accetta una perdita di fedeltà al moto originale.
+
+Dal punto di vista didattico, il progetto ha offerto l'opportunità di
+approfondire concretamente tanto i fondamenti classici della visione artificiale
+— scala di interesse, invarianza ai descrittori, stima robusta con RANSAC —
+quanto le architetture deep learning per l'optical flow, verificandone i
+vantaggi e i limiti in un'applicazione reale. La dashboard realizzata
+costituisce uno strumento di esplorazione immediata e intuitiva di questi
+fenomeni, rendendo visibili e quantificabili differenze che altrimenti
+rimarrebbero difficili da apprezzare senza strumenti di analisi dedicati.
